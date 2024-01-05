@@ -25,12 +25,9 @@ from homeassistant.helpers.selector import (
     SelectSelectorMode,
 )
 
-from .helpers import validate_authentication
-
 from .const import (
     CONF_FUNCTIONS,
     CONF_BASE_URL,
-    CONF_NAME,
     DEFAULT_CONF_FUNCTIONS,
     DEFAULT_CONF_BASE_URL,
     DOMAIN,
@@ -41,6 +38,7 @@ _LOGGER = logging.getLogger(__name__)
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
+        vol.Optional(CONF_NAME): str,
         vol.Optional(CONF_BASE_URL, default=DEFAULT_CONF_BASE_URL): str,
     }
 )

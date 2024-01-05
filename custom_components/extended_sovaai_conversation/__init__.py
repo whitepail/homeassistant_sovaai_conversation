@@ -55,9 +55,7 @@ from .helpers import (
     ScrapeFunctionExecutor,
     CompositeFunctionExecutor,
     convert_to_template,
-    validate_authentication,
     get_function_executor,
-    is_azure,
 )
 
 
@@ -71,8 +69,6 @@ DATA_AGENT = "agent"
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up SovaAI Conversation from a config entry."""
-
-    try:
 
     agent = SovaAIAgent(hass, entry)
 
@@ -110,15 +106,15 @@ class SovaAIAgent(conversation.AbstractConversationAgent):
         self, user_input: conversation.ConversationInput
     ) -> conversation.ConversationResult:
         exposed_entities = self.get_exposed_entities()
-        context = { "env_sitelang": "ru-RU", "isDevice": true }
+        context = { "env_sitelang": "ru-RU", "isDevice": True }
 
         if user_input.conversation_id in self.history:
             async with self.client.post('/api/Chat.init',json={"uuid": "6944d0b0-ca59-4007-97bf-867d6c4385a9", "cuid": user_input.conversation_id, "context": context}) as response:
-               await json_response = response.json()
+               json_response = await response.json()
                conversation_id = json_response['result']['cuid']
         else:
             async with self.client.post('/api/Chat.init',json={"uuid": "6944d0b0-ca59-4007-97bf-867d6c4385a9", "cuid": "", "context": context}) as response:
-               await json_response = response.json()
+               json_response = await response.json()
                conversation_id = json_response['result']['cuid']
         user_input.conversation_id = conversation_id
         try:
@@ -135,9 +131,9 @@ class SovaAIAgent(conversation.AbstractConversationAgent):
             )
 
         intent_response = intent.IntentResponse(language=user_input.language)
-        intent_response.async_set_speech(response.content)
+        intent_response.async_set_speech(response['content'])
         return conversation.ConversationResult(
-            response=intent_response, conversation_id=conversation_id
+            response=intent_response, conversation_id=response['conversation_id']
         )
 
     def _async_generate_prompt(self, raw_prompt: str, exposed_entities) -> str:
@@ -202,19 +198,19 @@ class SovaAIAgent(conversation.AbstractConversationAgent):
         n_requests,
     ):
         """Process a sentence."""
-        functions = list(map(lambda s: s["spec"], self.get_functions()))
-        function_call = "auto"
-        if len(functions) == 0:
-            functions = None
-            function_call = None
+#        functions = list(map(lambda s: s["spec"], self.get_functions()))
+#        function_call = "auto"
+#        if len(functions) == 0:
+#            functions = None
+#            function_call = None
 
-        _LOGGER.info("Prompt: %s", messages)
+        _LOGGER.info("Prompt: %s", user_input.text)
 
         async with self.client.post('/api/Chat.request',json={"cuid": user_input.conversation_id, "text": user_input.text, "context": context}) as response:
             _LOGGER.info("Response %s", response)
-            await json_response = response.json()
+            json_response = await response.json()
             user_input.conversation_id = json_response['result']['cuid']
-            message = {"content": json_response['result']['text'], "conversation_id": json_response['result']['cuid'], "context": json_response['result']['context']}
+            message = {"content": json_response['result']['text']['value'], "conversation_id": json_response['result']['cuid'], "context": json_response['result']['context']}
             return message
 
 
