@@ -1,0 +1,21 @@
+{
+  "domain": "extended_sovaai_conversation",
+  "name": "Extended SovaAI Conversation",
+  "codeowners": [
+    "@whitepail"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "conversation",
+    "history",
+    "recorder",
+    "rest",
+    "scrape"
+  ],
+  "documentation": "https://github.com/whitepail/homeassistant_sovaai_conversation",
+  "integration_type": "service",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/whitepail/homeassistant_sovaai_conversation/issues",
+  "requirements": [],
+  "version": "1.0.0"
+}
