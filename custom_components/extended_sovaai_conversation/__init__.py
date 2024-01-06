@@ -30,6 +30,7 @@ from homeassistant.helpers import (
 
 from .const import (
     CONF_BASE_URL,
+    CONF_FUNCTIONS,
     DEFAULT_CONF_FUNCTIONS,
     DOMAIN,
 )
@@ -102,12 +103,18 @@ class SovaAIAgent(conversation.AbstractConversationAgent):
         """Return a list of supported languages."""
         return MATCH_ALL
 
+    def prepare_context(
+        self, user_input: conversation.ConversationInput
+    ):
+        context = { "env_sitelang": "ru-RU", "isDevice": True , "finish_reason": ""}
+        return context
+
     async def async_process(
         self, user_input: conversation.ConversationInput
     ) -> conversation.ConversationResult:
         exposed_entities = self.get_exposed_entities()
-        context = { "env_sitelang": "ru-RU", "isDevice": True }
-
+        context = self.prepare_context(user_input)
+        _LOGGER.warning("COntext: %s", context)
         if user_input.conversation_id in self.history:
             async with self.client.post('/api/Chat.init',json={"uuid": "6944d0b0-ca59-4007-97bf-867d6c4385a9", "cuid": user_input.conversation_id, "context": context}) as response:
                json_response = await response.json()
@@ -174,8 +181,11 @@ class SovaAIAgent(conversation.AbstractConversationAgent):
 
     def get_functions(self):
         try:
+            _LOGGER.warning("Start loading functions")
             function = self.entry.options.get(CONF_FUNCTIONS)
+            _LOGGER.warning("Got functions: %s", function)
             result = yaml.safe_load(function) if function else DEFAULT_CONF_FUNCTIONS
+            _LOGGER.warning("Yaml loaded: %s", result)
             if result:
                 for setting in result:
                     function_executor = get_function_executor(
@@ -198,11 +208,11 @@ class SovaAIAgent(conversation.AbstractConversationAgent):
         n_requests,
     ):
         """Process a sentence."""
-#        functions = list(map(lambda s: s["spec"], self.get_functions()))
-#        function_call = "auto"
-#        if len(functions) == 0:
-#            functions = None
-#            function_call = None
+        functions = list(map(lambda s: s["spec"], self.get_functions()))
+        function_call = "auto"
+        if len(functions) == 0:
+            functions = None
+            function_call = None
 
         _LOGGER.info("Prompt: %s", user_input.text)
 
@@ -210,26 +220,23 @@ class SovaAIAgent(conversation.AbstractConversationAgent):
             _LOGGER.info("Response %s", response)
             json_response = await response.json()
             user_input.conversation_id = json_response['result']['cuid']
-            message = {"content": json_response['result']['text']['value'], "conversation_id": json_response['result']['cuid'], "context": json_response['result']['context']}
-            return message
-
-
-#        choice: Choice = response.choices[0]
-#        message = choice.message
-#        if choice.finish_reason == "function_call":
-#            message = await self.execute_function_call(
-#                user_input, messages, message, exposed_entities, n_requests + 1
-#            )
+            if (n_requests < 1) and (json_response['result']['context']['finish_reason'] == "function_call"):
+              message = await self.execute_function_call(
+                  user_input, json_response['result'], exposed_entities, n_requests + 1
+              )
+            else:
+              message = {"content": json_response['result']['text']['value'], "conversation_id": json_response['result']['cuid'], "context": json_response['result']['context']}
+              return message
 
     def execute_function_call(
         self,
         user_input: conversation.ConversationInput,
-        messages,
-        message: ChatCompletionMessage,
+        response,
         exposed_entities,
-        n_requests,
+        n_requests
     ):
-        function_name = message.function_call.name
+        function_name = response['context']['function_call_name']
+        _LOGGER.warning("Function call %s", function_name)
         function = next(
             (s for s in self.get_functions() if s["spec"]["name"] == function_name),
             None,
@@ -237,39 +244,33 @@ class SovaAIAgent(conversation.AbstractConversationAgent):
         if function is not None:
             return self.execute_function(
                 user_input,
-                messages,
-                message,
+                response,
                 exposed_entities,
-                n_requests,
                 function,
+                n_requests
             )
         raise FunctionNotFound(function_name)
 
     async def execute_function(
         self,
         user_input: conversation.ConversationInput,
-        messages,
-        message: ChatCompletionMessage,
+        response,
         exposed_entities,
-        n_requests,
         function,
+        n_requests
     ):
         function_executor = get_function_executor(function["function"]["type"])
 
         try:
-            arguments = json.loads(message.function_call.arguments)
+            arguments = json.loads(response['context']['function_call_arguments'])
         except json.decoder.JSONDecodeError as err:
-            raise ParseArgumentsFailed(message.function_call.arguments) from err
+            raise ParseArgumentsFailed(response['context']['function_call_arguments']) from err
 
         result = await function_executor.execute(
             self.hass, function["function"], arguments, user_input, exposed_entities
         )
-
-        messages.append(
-            {
-                "role": "function",
-                "name": message.function_call.name,
-                "content": str(result),
-            }
-        )
-        return await self.query(user_input, messages, exposed_entities, n_requests)
+        context=self.prepare_context(user_input)
+        context['function_call_name'] = response['context']['function_call_name']
+        context['function_call_arguments'] = response['context']['function_call_arguments']
+        context['function_call_result'] = str(result)
+        return await self.query(user_input, context, exposed_entities, n_requests)
