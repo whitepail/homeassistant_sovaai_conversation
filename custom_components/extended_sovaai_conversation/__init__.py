@@ -106,7 +106,7 @@ class SovaAIAgent(conversation.AbstractConversationAgent):
     def prepare_context(
         self, user_input: conversation.ConversationInput
     ):
-        context = { "env_sitelang": "ru-RU", "isDevice": True , "finish_reason": ""}
+        context = { "env_sitelang": "ru-RU", "isDevice": True , "finish_reason": "", "inf_initiator": "homeassistant"}
         return context
 
     async def async_process(
@@ -181,13 +181,13 @@ class SovaAIAgent(conversation.AbstractConversationAgent):
 
     def get_functions(self):
         try:
-            _LOGGER.warning("Start loading functions")
             function = self.entry.options.get(CONF_FUNCTIONS)
-            _LOGGER.warning("Got functions: %s", function)
             result = yaml.safe_load(function) if function else DEFAULT_CONF_FUNCTIONS
             _LOGGER.warning("Yaml loaded: %s", result)
             if result:
                 for setting in result:
+                    _LOGGER.warning("Function loaded: %s %s", setting["function"]["name"], setting["function"]["type"])
+
                     function_executor = get_function_executor(
                         setting["function"]["type"]
                     )
@@ -217,15 +217,18 @@ class SovaAIAgent(conversation.AbstractConversationAgent):
         _LOGGER.info("Prompt: %s", user_input.text)
 
         async with self.client.post('/api/Chat.request',json={"cuid": user_input.conversation_id, "text": user_input.text, "context": context}) as response:
-            _LOGGER.info("Response %s", response)
+            _LOGGER.warning("Response %s", response)
             json_response = await response.json()
             user_input.conversation_id = json_response['result']['cuid']
             if (n_requests < 1) and (json_response['result']['context']['finish_reason'] == "function_call"):
               message = await self.execute_function_call(
                   user_input, json_response['result'], exposed_entities, n_requests + 1
               )
+              _LOGGER.warning("Result after function call: %s", message)
+              return message
             else:
               message = {"content": json_response['result']['text']['value'], "conversation_id": json_response['result']['cuid'], "context": json_response['result']['context']}
+              _LOGGER.warning("Result without function call: %s", message)
               return message
 
     def execute_function_call(
@@ -262,9 +265,11 @@ class SovaAIAgent(conversation.AbstractConversationAgent):
         function_executor = get_function_executor(function["function"]["type"])
 
         try:
-            arguments = json.loads(response['context']['function_call_arguments'])
+            arguments = json.loads(response['context']['function_call_arguments'].replace("'", '"').replace("@#x5B;", '[').replace("@#x5D;", ']'))
         except json.decoder.JSONDecodeError as err:
             raise ParseArgumentsFailed(response['context']['function_call_arguments']) from err
+
+        _LOGGER.warning("Starting function %s %s with params %s", function["function"]["type"], function["function"]["name"], arguments)
 
         result = await function_executor.execute(
             self.hass, function["function"], arguments, user_input, exposed_entities
@@ -272,5 +277,5 @@ class SovaAIAgent(conversation.AbstractConversationAgent):
         context=self.prepare_context(user_input)
         context['function_call_name'] = response['context']['function_call_name']
         context['function_call_arguments'] = response['context']['function_call_arguments']
-        context['function_call_result'] = str(result)
+        context['function_call_result'] = str(result).replace("[","").replace("]","")
         return await self.query(user_input, context, exposed_entities, n_requests)

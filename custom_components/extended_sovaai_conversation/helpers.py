@@ -218,6 +218,8 @@ class NativeFunctionExecutor(FunctionExecutor):
                 raise ServiceNotFound(domain, service)
             self.validate_entity_ids(hass, entity_id, exposed_entities)
 
+            _LOGGER.warning("Running execute_service")
+
             try:
                 await hass.services.async_call(
                     domain=domain,
